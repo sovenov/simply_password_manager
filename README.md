@@ -6,7 +6,7 @@
 
 ## Демо
 
-Статическая версия без сервера: открыть [`DEMO/`](DEMO/) на GitHub Pages или любом статичном хостинге.
+Статическая версия без сервера: [https://sovenov.github.io/simply_password_manager](https://sovenov.github.io/simply_password_manager)
 
 Логин для входа: `sovenov` / `sovenov`. Все данные сохраняются только в `localStorage` вашего браузера и никуда не передаются.
 
