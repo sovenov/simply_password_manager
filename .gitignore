@@ -1,0 +1,28 @@
+# Секреты и пользовательские конфиги - НИКОГДА не коммитить
+configs/cfg.ini
+bash_scripts/backup.sh
+
+# Локальная БД и любые её копии/дампы
+DB/*.sqlite
+DB/*.sqlite-journal
+DB/*.sqlite-wal
+DB/*.sqlite-shm
+DB/*.db
+DB/*.bak
+up/*.sqlite
+
+# 7-Zip standalone binary - качается вручную при настройке
+bash_scripts/7zzs
+
+# Логи и временные файлы
+*.log
+up/cache.log
+
+# OS / IDE мусор
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*~

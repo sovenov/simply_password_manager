@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+
+# Скопируйте этот файл в bash_scripts/backup.sh, подставьте свои значения
+# и сделайте исполняемым: chmod +x bash_scripts/backup.sh
+#
+# Файл bash_scripts/backup.sh ДОЛЖЕН быть в .gitignore и НИКОГДА не должен
+# попадать в репозиторий - он содержит токены доступа к вашим бэкап-хранилищам.
+#
+# Также положите рядом исполняемый файл 7zzs (статический 7-Zip для Linux,
+# https://www.7-zip.org/download.html, "Linux x64 console version") - он
+# намеренно НЕ хранится в репозитории.
+
+set -euo pipefail
+
+# ============================================================
+# Telegram and archive settings
+# ============================================================
+
+# Токен Telegram-бота, выдаётся @BotFather.
+BOT_TOKEN='YOUR_TELEGRAM_BOT_TOKEN'
+
+# ID чата, в который бот будет слать архивы.
+# Можно узнать через @userinfobot или @getmyid_bot.
+CHAT_ID='YOUR_TELEGRAM_CHAT_ID'
+
+# OAuth-токен Яндекс.Диска.
+# Получить: https://yandex.ru/dev/disk/poligon/
+YA_TOKEN='YOUR_YANDEX_DISK_OAUTH_TOKEN'
+
+# Папка на Яндекс.Диске, куда складывать архивы. Должна существовать.
+YANDEX_REMOTE_DIR='/backup'
+
+# Пароль на 7z-архив. Минимум 16 случайных символов.
+ARCHIVE_PASSWORD='CHANGE_ME_TO_A_LONG_RANDOM_PASSWORD'
+
+CONNECT_TIMEOUT_SECONDS=10
+
+# ============================================================
+# Paths
+# ============================================================
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+TARGET_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+TARGET_PARENT_DIR="$(dirname -- "$TARGET_DIR")"
+TARGET_NAME="$(basename -- "$TARGET_DIR")"
+TIMESTAMP="$(date '+%Y-%m-%d_%H-%M-%S')"
+SEVEN_ZIP_COMMAND="${SCRIPT_DIR}/7zzs"
+
+TEMP_DIR="$(mktemp -d)"
+ARCHIVE_PATH="${TEMP_DIR}/${TARGET_NAME}_${TIMESTAMP}.7z"
+RESPONSE_FILE="$(mktemp)"
+
+cleanup() {
+    local status=$?
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] backup.sh finished with status ${status}"
+    rm -f -- "$RESPONSE_FILE"
+    rm -rf -- "$TEMP_DIR"
+}
+
+trap cleanup EXIT
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] backup.sh started, pid=$$"
+
+# ============================================================
+# Checks
+# ============================================================
+
+if [[ -z "$BOT_TOKEN" ]]; then
+    echo "Error: set BOT_TOKEN inside backup.sh." >&2
+    exit 1
+fi
+
+if [[ -z "$CHAT_ID" ]]; then
+    echo "Error: set CHAT_ID inside backup.sh." >&2
+    exit 1
+fi
+
+if [[ -z "$YA_TOKEN" ]]; then
+    echo "Error: set YA_TOKEN inside backup.sh." >&2
+    exit 1
+fi
+
+if [[ ! -f "$SEVEN_ZIP_COMMAND" ]]; then
+    echo "Error: 7zzs was not found at ${SEVEN_ZIP_COMMAND}." >&2
+    exit 1
+fi
+
+if [[ ! -x "$SEVEN_ZIP_COMMAND" ]]; then
+    chmod +x "$SEVEN_ZIP_COMMAND" 2>/dev/null || {
+        echo "Error: 7zzs is not executable. Run: chmod +x ${SEVEN_ZIP_COMMAND}" >&2
+        exit 1
+    }
+fi
+
+if ! "$SEVEN_ZIP_COMMAND" >/dev/null 2>&1; then
+    echo "Error: 7zzs cannot be executed on this server." >&2
+    exit 1
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+    echo "Error: curl is not installed." >&2
+    echo "Install on Debian/Ubuntu: sudo apt update && sudo apt install -y curl" >&2
+    exit 1
+fi
+
+# ============================================================
+# Archive
+# ============================================================
+
+echo "Archiving folder: $TARGET_DIR"
+echo "Creating encrypted 7z archive: $ARCHIVE_PATH"
+
+(
+    cd -- "$TARGET_PARENT_DIR"
+
+    "$SEVEN_ZIP_COMMAND" \
+        a \
+        -t7z \
+        -mx=1 \
+        -mhe=on \
+        -bd \
+        -bb0 \
+        -bsp0 \
+        "-p${ARCHIVE_PASSWORD}" \
+        "$ARCHIVE_PATH" \
+        "$TARGET_NAME"
+)
+
+if [[ ! -f "$ARCHIVE_PATH" ]]; then
+    echo "Error: archive was not created." >&2
+    exit 1
+fi
+
+ARCHIVE_SIZE="$(du -h "$ARCHIVE_PATH" | cut -f1)"
+
+echo "Archive created: $(basename -- "$ARCHIVE_PATH")"
+echo "Archive size: $ARCHIVE_SIZE"
+
+# ============================================================
+# Uploads
+# ============================================================
+
+CAPTION="Archive: ${TARGET_NAME}
+Created: $(date '+%d.%m.%Y %H:%M:%S')
+Size: ${ARCHIVE_SIZE}"
+
+send_telegram_archive() {
+    local http_code
+
+    : > "$RESPONSE_FILE"
+    echo "Uploading archive to Telegram."
+
+    if ! http_code="$(
+        curl \
+            --silent \
+            --show-error \
+            --connect-timeout "$CONNECT_TIMEOUT_SECONDS" \
+            --speed-time "$CONNECT_TIMEOUT_SECONDS" \
+            --speed-limit 1 \
+            --output "$RESPONSE_FILE" \
+            --write-out "%{http_code}" \
+            -X POST \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+            -F "chat_id=${CHAT_ID}" \
+            -F "document=@${ARCHIVE_PATH}" \
+            -F "caption=${CAPTION}"
+    )"; then
+        echo "Error sending archive to Telegram: connection or curl failure." >&2
+        return 1
+    fi
+
+    if [[ "$http_code" != 2* ]] || ! grep -q '"ok":true' "$RESPONSE_FILE"; then
+        echo "Error sending archive to Telegram. HTTP code: $http_code" >&2
+        cat "$RESPONSE_FILE" >&2
+        echo >&2
+        return 1
+    fi
+
+    echo "Archive successfully sent to Telegram."
+    return 0
+}
+
+json_string_value() {
+    local key="$1"
+
+    sed -n "s/.*\"${key}\":\"\\([^\"]*\\)\".*/\\1/p" | head -n 1 | sed 's#\\/#/#g; s#\\u0026#\&#g'
+}
+
+upload_yandex_disk() {
+    local current_date
+    local remote_file
+    local response
+    local error_msg
+    local upload_url
+    local upload_status
+
+    current_date="$(date '+%Y-%m-%d')_$(date '+%s')"
+    remote_file="${YANDEX_REMOTE_DIR}/backup_pas_${current_date}.docx"
+
+    echo "Requesting Yandex Disk upload URL: ${remote_file}"
+
+    if ! response="$(
+        curl \
+            --silent \
+            --show-error \
+            --connect-timeout "$CONNECT_TIMEOUT_SECONDS" \
+            --speed-time "$CONNECT_TIMEOUT_SECONDS" \
+            --speed-limit 1 \
+            -H "Authorization: OAuth ${YA_TOKEN}" \
+            --get "https://cloud-api.yandex.net/v1/disk/resources/upload" \
+            --data-urlencode "path=${remote_file}" \
+            --data "overwrite=true"
+    )"; then
+        echo "Error requesting Yandex Disk upload URL: connection or curl failure." >&2
+        return 1
+    fi
+
+    error_msg="$(printf '%s' "$response" | json_string_value 'message')"
+    if [[ -n "$error_msg" ]]; then
+        echo "Yandex Disk API error: $error_msg" >&2
+        return 1
+    fi
+
+    upload_url="$(printf '%s' "$response" | json_string_value 'href')"
+    if [[ -z "$upload_url" ]]; then
+        echo "Failed to parse Yandex Disk upload URL. Response: $response" >&2
+        return 1
+    fi
+
+    echo "Uploading archive to Yandex Disk."
+
+    if ! upload_status="$(
+        curl \
+            --silent \
+            --show-error \
+            --connect-timeout "$CONNECT_TIMEOUT_SECONDS" \
+            --speed-time "$CONNECT_TIMEOUT_SECONDS" \
+            --speed-limit 1 \
+            --write-out "%{http_code}" \
+            --output /dev/null \
+            -T "$ARCHIVE_PATH" \
+            "$upload_url"
+    )"; then
+        echo "Error uploading archive to Yandex Disk: connection or curl failure." >&2
+        return 1
+    fi
+
+    if [[ "$upload_status" != "201" ]]; then
+        echo "Yandex Disk upload failed with HTTP status: $upload_status" >&2
+        return 1
+    fi
+
+    echo "Archive successfully uploaded to Yandex Disk: ${remote_file}"
+    return 0
+}
+
+TELEGRAM_OK=0
+YANDEX_OK=0
+
+if send_telegram_archive; then
+    TELEGRAM_OK=1
+fi
+
+if upload_yandex_disk; then
+    YANDEX_OK=1
+fi
+
+if [[ "$TELEGRAM_OK" -ne 1 && "$YANDEX_OK" -ne 1 ]]; then
+    echo "Error: archive was not uploaded to Telegram or Yandex Disk." >&2
+    exit 1
+fi
+
+if [[ "$TELEGRAM_OK" -ne 1 || "$YANDEX_OK" -ne 1 ]]; then
+    echo "Warning: archive was uploaded only to one backup service." >&2
+fi
+
+echo "Backup upload finished."

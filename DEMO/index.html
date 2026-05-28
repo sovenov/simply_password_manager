@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="HandheldFriendly" content="true">
+    <meta name="MobileOptimized" content="320">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'">
+    <meta name="spm-ls-secret" content="demo-local-storage-secret-2026">
+    <link rel="icon" type="image/x-icon" href="password.ico">
+    <title>Менеджер паролей — Демо</title>
+    <link rel="stylesheet" href="styles.css" integrity="sha384-tsJVnGYELk4TOPgq5He6wsZQLJjlSPdNvHGgEL6P838wXrUe7z9SukAssyrtRD3+" crossorigin="anonymous">
+</head>
+<body>
+    <div id="toast" class="toast">📋 Успешно скопировано!</div>
+
+    <div class="auth-shell" id="authShell">
+        <div class="auth-panel">
+            <div class="auth-message" id="authMessage">Демо-версия. Данные хранятся локально в браузере. Логин: <b>sovenov</b> / <b>sovenov</b>.</div>
+            <label for="authLogin">Логин</label>
+            <input type="text" id="authLogin" autocomplete="username" autocapitalize="none" spellcheck="false" value="sovenov">
+            <label for="authPassword">Пароль</label>
+            <input type="password" id="authPassword" autocomplete="current-password" autocapitalize="none" spellcheck="false" value="sovenov">
+            <input type="hidden" id="authKey" value="demo">
+            <button type="button" id="authSubmitBtn">Войти</button>
+        </div>
+    </div>
+
+    <div class="page-shell app-shell" id="appShell">
+        <button type="button" class="mobile-menu-toggle" id="mobileMenuToggle" aria-expanded="false">Меню управления</button>
+        <div class="user-strip">
+            <button type="button" id="currentUserBtn" class="current-user"></button>
+            <span class="api-status api-status-offline" id="apiStatus" title="Соединение с сервером"><span class="api-status-dot"></span><span class="api-status-text">offline</span></span>
+        </div>
+        <div class="top-bar">
+        <div class="top-bar-fields">
+            <div class="group">
+                <label for="masterKey">Ключ:</label>
+                <input type="password" id="masterKey" placeholder="Мастер-ключ" autocomplete="off" autocapitalize="none" spellcheck="false">
+            </div>
+            <div class="group desktop-search-group">
+                <label for="searchInputDesktop">Поиск:</label>
+                <input type="text" id="searchInputDesktop" class="js-search-input" placeholder="Поиск...">
+            </div>
+        </div>
+        <div class="top-bar-options">
+            <div class="settings-dropdown" id="settingsDropdown">
+                <button type="button" class="settings-dropdown-toggle" id="settingsDropdownToggle" aria-expanded="false">Настройки</button>
+                <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                    <label class="checkbox-container dropdown-option">
+                        <input type="checkbox" id="rememberKey">
+                        <span class="checkmark"></span>
+                        <span>Сохранять ключ локально</span>
+                    </label>
+                    <label class="checkbox-container dropdown-option">
+                        <input type="checkbox" id="storeLocalData">
+                        <span class="checkmark"></span>
+                        <span>Оффлайн доступ</span>
+                    </label>
+                    <label class="checkbox-container dropdown-option">
+                        <input type="checkbox" id="hidePasswords" checked>
+                        <span class="checkmark"></span>
+                        <span>Скрывать пароли</span>
+                    </label>
+                    <label class="checkbox-container dropdown-option">
+                        <input type="checkbox" id="hideUsernames">
+                        <span class="checkmark"></span>
+                        <span>Скрывать логины</span>
+                    </label>
+                    <label class="checkbox-container dropdown-option">
+                        <input type="checkbox" id="hideNotes">
+                        <span class="checkmark"></span>
+                        <span>Скрывать заметки</span>
+                    </label>
+                    <label class="checkbox-container dropdown-option">
+                        <input type="checkbox" id="hideOtp" checked>
+                        <span class="checkmark"></span>
+                        <span>Скрывать OTP</span>
+                    </label>
+                    <label class="checkbox-container dropdown-option">
+                        <input type="checkbox" id="darkTheme">
+                        <span class="checkmark"></span>
+                        <span>Тёмная тема</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <div class="tabs-container desktop-tabs" id="tabsListDesktop"></div>
+
+        <div class="layout">
+        <div class="left-column">
+            <div class="panel" id="sidePanel">
+                <h3 id="formTitle">Добавить пароль</h3>
+                <input type="hidden" id="editId">
+
+                <label for="formGroup">Группа</label>
+                <select id="formGroup">
+                    <option value="">Все (Без группы)</option>
+                </select>
+
+                <label for="formTitleField">Название / Сервис</label>
+                <input type="text" id="formTitleField" placeholder="Google, VK и т.д.">
+
+                <label for="formUsername">Логин</label>
+                <textarea id="formUsername" class="compact-textarea" placeholder="user@example.com" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea>
+
+                <label for="formPassword">Пароль</label>
+                <textarea id="formPassword" class="compact-textarea" placeholder="Секретный пароль" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea>
+                <button type="button" class="secondary password-generate-btn" id="generatePasswordBtn">Сгенерировать пароль</button>
+                <div class="password-generator-row">
+                    <div class="password-length-field">
+                        <label for="passwordLength">Символов</label>
+                        <input type="number" id="passwordLength" value="30" min="1" max="512" step="1">
+                    </div>
+                    <div class="password-charset-field">
+                        <label>Символы</label>
+                        <div class="charset-dropdown" id="passwordCharsetDropdown">
+                            <button type="button" class="charset-toggle" id="passwordCharsetToggle">A-Z, a-z, 0-9</button>
+                            <div class="charset-menu" id="passwordCharsetMenu">
+                                <label class="charset-option">
+                                    <input type="checkbox" class="js-password-charset" value="upper" checked>
+                                    <span>A-Z</span>
+                                </label>
+                                <label class="charset-option">
+                                    <input type="checkbox" class="js-password-charset" value="lower" checked>
+                                    <span>a-z</span>
+                                </label>
+                                <label class="charset-option">
+                                    <input type="checkbox" class="js-password-charset" value="digits" checked>
+                                    <span>0-9</span>
+                                </label>
+                                <label class="charset-option">
+                                    <input type="checkbox" class="js-password-charset" value="symbols">
+                                    <span>!@#$%^&amp;*()_+&quot;№;:?/|\'][~`&lt;&gt;</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <label for="formNotes">Заметки (любой формат)</label>
+                <textarea id="formNotes" placeholder="Дополнительная информация..." autocomplete="off" autocapitalize="none" spellcheck="false"></textarea>
+
+                <label for="formOtp">OTP</label>
+                <textarea id="formOtp" class="compact-textarea" placeholder="otpauth://totp/... или BASE32 секрет" autocomplete="off" autocapitalize="none" spellcheck="false"></textarea>
+                <div class="otp-camera-row">
+                    <button type="button" class="otp-camera-btn" id="formOtpCameraBtn">Сканировать камерой</button>
+                    <span class="otp-camera-note" id="formOtpCameraMessage"></span>
+                </div>
+
+                <button type="button" id="saveBtn">Зашифровать и сохранить</button>
+                <button type="button" class="secondary cancel-btn" id="cancelBtn">Отмена</button>
+            </div>
+
+            <div class="panel">
+                <h3 class="export-title">Экспорт данных</h3>
+                <p class="export-description">Выгрузить все расшифрованные пароли в один файл JSON.</p>
+                <button type="button" class="btn-export" id="exportBtn">⬇ JSON Экспорт</button>
+                <div class="import-section">
+                    <h3 class="export-title">Импорт данных</h3>
+                    <p class="export-description">Загрузить пароли из файла JSON такой же структуры, как при экспорте.</p>
+                    <input type="file" id="importFile" class="import-file" accept=".json,application/json">
+                    <div class="import-dropzone" id="importDropZone">Перетащите JSON файл сюда</div>
+                    <button type="button" class="secondary" id="importBtn">Импортировать JSON</button>
+                    <div class="auth-message import-message" id="importMessage"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mobile-controls">
+            <div class="tabs-container mobile-tabs" id="tabsListMobile"></div>
+            <div class="mobile-search-block">
+                <div class="mobile-search-header">
+                    <label for="searchInputMobile">Поиск:</label>
+                    <button type="button" class="mobile-search-pin-btn" id="mobileSearchPinBtn" aria-pressed="true">Открепить</button>
+                </div>
+                <input type="text" id="searchInputMobile" class="js-search-input" placeholder="Поиск...">
+            </div>
+        </div>
+
+        <div class="content" id="passwordsList"></div>
+        </div>
+    </div>
+
+    <script src="jquery-3.7.1.min.js" integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs" crossorigin="anonymous"></script>
+    <script src="Sortable.min.js" integrity="sha384-HZZ/fukV+9G8gwTNjN7zQDG0Sp7MsZy5DDN6VfY3Be7V9dvQpEpR2jF2HlyFUUjU" crossorigin="anonymous"></script>
+    <script src="app.js" crossorigin="anonymous"></script>
+</body>
+</html>
