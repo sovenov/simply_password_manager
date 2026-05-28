@@ -1,10 +1,10 @@
 if (typeof self !== 'undefined' && typeof ServiceWorkerGlobalScope !== 'undefined' && self instanceof ServiceWorkerGlobalScope) {
     'use strict';
 
-    var CACHE_NAME = 'simply-pass-shell-v30';
+    var CACHE_NAME = 'spm-demo-shell-v1';
     var APP_SHELL = [
         './',
-        './index.php',
+        './index.html',
         './styles.css',
         './html5-qrcode.min.js',
         './jquery-3.7.1.min.js',
@@ -31,7 +31,7 @@ if (typeof self !== 'undefined' && typeof ServiceWorkerGlobalScope !== 'undefine
         }
 
         if (relativePath === 'index.php' || relativePath === 'index.html') {
-            return './index.php';
+            return './index.html';
         }
 
         if (relativePath === 'styles.css') {
@@ -153,6 +153,8 @@ if (typeof self !== 'undefined' && typeof ServiceWorkerGlobalScope !== 'undefine
 } else {
 (function ($) {
     'use strict';
+
+    var DEMO_MODE = true;
 
     var dbPasswords = [];
     var dbGroups = [];
@@ -556,6 +558,11 @@ if (typeof self !== 'undefined' && typeof ServiceWorkerGlobalScope !== 'undefine
         var scripts;
         var src;
         var i;
+
+        if (DEMO_MODE) {
+            debugLog('service-worker.skip.demo');
+            return;
+        }
 
         if (!('serviceWorker' in navigator)) {
             debugLog('service-worker.skip.no-support');
@@ -971,6 +978,320 @@ if (typeof self !== 'undefined' && typeof ServiceWorkerGlobalScope !== 'undefine
         return storedValue === '1';
     }
 
+    // === DEMO MODE: localStorage-backed mock of api.php ===
+    if (DEMO_MODE) {
+        var DEMO_STORAGE_KEY = 'spm_demo_db';
+        var DEMO_LOGIN = 'sovenov';
+        var DEMO_PASSWORD = 'sovenov';
+        var demoCsrfToken = 'demo-csrf-' + Math.random().toString(36).substring(2);
+
+        var demoNowSec = function () { return Math.floor(Date.now() / 1000); };
+
+        var demoLoadDb = function () {
+            try {
+                var raw = localStorage.getItem(DEMO_STORAGE_KEY);
+                if (raw) {
+                    var parsed = JSON.parse(raw);
+                    if (parsed && parsed.groups && parsed.passwords) {
+                        parsed.sessionActive = !!parsed.sessionActive;
+                        parsed.nextGroupId = parsed.nextGroupId || 1;
+                        parsed.nextPasswordId = parsed.nextPasswordId || 1;
+                        return parsed;
+                    }
+                }
+            } catch (e) {}
+            return { groups: [], passwords: [], sessionActive: false, nextGroupId: 1, nextPasswordId: 1 };
+        };
+
+        var demoSaveDb = function (db) {
+            try { localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(db)); } catch (e) {}
+        };
+
+        var demoDeferred = function (value) {
+            var d = $.Deferred();
+            setTimeout(function () {
+                d.resolve(value, 'success', { status: 200, responseJSON: value });
+            }, 40);
+            return d.promise();
+        };
+
+        var demoRejected = function (status, message) {
+            var d = $.Deferred();
+            setTimeout(function () {
+                d.reject({
+                    status: status,
+                    responseJSON: { error: message },
+                    responseText: JSON.stringify({ error: message }),
+                    statusText: 'error'
+                });
+            }, 40);
+            return d.promise();
+        };
+
+        var demoUserPayload = function () {
+            return {
+                id: 1,
+                login: DEMO_LOGIN,
+                login_hash: 'demo',
+                is_admin: true,
+                is_owner: true,
+                is_approved: true,
+                created_at: demoNowSec(),
+                updated_at: demoNowSec()
+            };
+        };
+
+        var demoFindById = function (items, id) {
+            var idNum = parseInt(id, 10);
+            var i;
+            for (i = 0; i < items.length; i += 1) {
+                if (parseInt(items[i].id, 10) === idNum) return i;
+            }
+            return -1;
+        };
+
+        var demoSortPasswords = function (passwords) {
+            return passwords.slice().sort(function (a, b) {
+                var af = a.is_favorite || 0;
+                var bf = b.is_favorite || 0;
+                if (af !== bf) return bf - af;
+                if (af && bf) {
+                    var afat = a.favorited_at || 0;
+                    var bfat = b.favorited_at || 0;
+                    if (afat !== bfat) return bfat - afat;
+                }
+                return (b.updated_at || 0) - (a.updated_at || 0);
+            });
+        };
+
+        var demoSortGroups = function (groups) {
+            return groups.slice().sort(function (a, b) {
+                var aso = a.sort_order || 0;
+                var bso = b.sort_order || 0;
+                if (aso !== bso) return aso - bso;
+                return (a.updated_at || 0) - (b.updated_at || 0);
+            });
+        };
+
+        var demoHandleSession = function () {
+            var db = demoLoadDb();
+            return demoDeferred({
+                authenticated: !!db.sessionActive,
+                user: db.sessionActive ? demoUserPayload() : null,
+                csrf: db.sessionActive ? demoCsrfToken : '',
+                debug_enabled: false
+            });
+        };
+
+        var demoHandleData = function () {
+            var db = demoLoadDb();
+            if (!db.sessionActive) return demoRejected(401, 'Unauthorized');
+            return demoDeferred({
+                passwords: demoSortPasswords(db.passwords),
+                groups: demoSortGroups(db.groups)
+            });
+        };
+
+        var demoHandleLogin = function (payload) {
+            var d = $.Deferred();
+            var authPayload = payload.auth_payload;
+            var authKey = payload.auth_key;
+
+            if (!authPayload || !authKey) {
+                setTimeout(function () {
+                    d.reject({ status: 400, responseJSON: { error: 'Missing auth payload' } });
+                }, 40);
+                return d.promise();
+            }
+
+            decryptData(authPayload.ciphertext, authPayload.iv, authKey, authPayload).then(function (plain) {
+                try {
+                    var parsed = JSON.parse(plain || '{}');
+                    if (parsed.login !== DEMO_LOGIN || parsed.password !== DEMO_PASSWORD) {
+                        d.reject({ status: 401, responseJSON: { error: 'Invalid login or password' } });
+                        return;
+                    }
+                    var db = demoLoadDb();
+                    db.sessionActive = true;
+                    demoSaveDb(db);
+                    d.resolve({ status: 'ok', user: demoUserPayload(), csrf: demoCsrfToken });
+                } catch (e) {
+                    d.reject({ status: 400, responseJSON: { error: 'Invalid auth payload' } });
+                }
+            }, function () {
+                d.reject({ status: 400, responseJSON: { error: 'Invalid auth encryption key' } });
+            });
+
+            return d.promise();
+        };
+
+        var demoHandlePost = function (payload) {
+            var action = payload.action;
+            if (action === 'login') return demoHandleLogin(payload);
+            if (action === 'register') return demoRejected(403, 'Регистрация недоступна в демо-версии');
+
+            var db = demoLoadDb();
+            var now = demoNowSec();
+
+            if (action === 'logout') {
+                db.sessionActive = false;
+                demoSaveDb(db);
+                return demoDeferred({ status: 'ok' });
+            }
+
+            if (!db.sessionActive) return demoRejected(401, 'Unauthorized');
+
+            if (action === 'save_password') {
+                var groupId = payload.group_id ? parseInt(payload.group_id, 10) : null;
+                if (groupId && demoFindById(db.groups, groupId) === -1) groupId = null;
+
+                var passwordId = payload.id ? parseInt(payload.id, 10) : 0;
+                if (passwordId > 0) {
+                    var pi = demoFindById(db.passwords, passwordId);
+                    if (pi === -1) return demoRejected(404, 'Password not found');
+                    db.passwords[pi].group_id = groupId;
+                    db.passwords[pi].ciphertext = payload.ciphertext;
+                    db.passwords[pi].iv = payload.iv;
+                    db.passwords[pi].kdf_iterations = payload.kdf_iterations;
+                    db.passwords[pi].kdf_salt = payload.kdf_salt;
+                    db.passwords[pi].updated_at = now;
+                } else {
+                    passwordId = db.nextPasswordId++;
+                    db.passwords.push({
+                        id: passwordId,
+                        group_id: groupId,
+                        ciphertext: payload.ciphertext,
+                        iv: payload.iv,
+                        kdf_iterations: payload.kdf_iterations,
+                        kdf_salt: payload.kdf_salt,
+                        is_favorite: 0,
+                        favorited_at: null,
+                        created_at: now,
+                        updated_at: now
+                    });
+                }
+                demoSaveDb(db);
+                return demoDeferred({ status: 'ok', password: db.passwords[demoFindById(db.passwords, passwordId)] });
+            }
+
+            if (action === 'delete_password') {
+                var dpid = parseInt(payload.id, 10);
+                var dpidx = demoFindById(db.passwords, dpid);
+                if (dpidx !== -1) {
+                    db.passwords.splice(dpidx, 1);
+                    demoSaveDb(db);
+                }
+                return demoDeferred({ status: 'ok' });
+            }
+
+            if (action === 'toggle_favorite') {
+                var tfid = parseInt(payload.id, 10);
+                var tfidx = demoFindById(db.passwords, tfid);
+                if (tfidx === -1) return demoRejected(404, 'Password not found');
+                var isFav = payload.is_favorite ? 1 : 0;
+                db.passwords[tfidx].is_favorite = isFav;
+                db.passwords[tfidx].favorited_at = isFav ? now : null;
+                demoSaveDb(db);
+                return demoDeferred({ status: 'ok', id: tfid, is_favorite: isFav });
+            }
+
+            if (action === 'save_group') {
+                var gid = payload.id ? parseInt(payload.id, 10) : 0;
+                if (gid > 0) {
+                    var gi = demoFindById(db.groups, gid);
+                    if (gi === -1) return demoRejected(404, 'Group not found');
+                    db.groups[gi].ciphertext = payload.ciphertext;
+                    db.groups[gi].iv = payload.iv;
+                    db.groups[gi].kdf_iterations = payload.kdf_iterations;
+                    db.groups[gi].kdf_salt = payload.kdf_salt;
+                    db.groups[gi].updated_at = now;
+                } else {
+                    var maxOrder = 0;
+                    var mi;
+                    for (mi = 0; mi < db.groups.length; mi += 1) {
+                        if ((db.groups[mi].sort_order || 0) > maxOrder) maxOrder = db.groups[mi].sort_order;
+                    }
+                    gid = db.nextGroupId++;
+                    db.groups.push({
+                        id: gid,
+                        ciphertext: payload.ciphertext,
+                        iv: payload.iv,
+                        kdf_iterations: payload.kdf_iterations,
+                        kdf_salt: payload.kdf_salt,
+                        sort_order: maxOrder + 1,
+                        created_at: now,
+                        updated_at: now
+                    });
+                }
+                demoSaveDb(db);
+                return demoDeferred({ status: 'ok', group: db.groups[demoFindById(db.groups, gid)] });
+            }
+
+            if (action === 'delete_group') {
+                var dgid = parseInt(payload.id, 10);
+                var dgidx = demoFindById(db.groups, dgid);
+                if (dgidx !== -1) {
+                    db.groups.splice(dgidx, 1);
+                    var pi2;
+                    for (pi2 = 0; pi2 < db.passwords.length; pi2 += 1) {
+                        if (parseInt(db.passwords[pi2].group_id, 10) === dgid) {
+                            db.passwords[pi2].group_id = null;
+                        }
+                    }
+                    demoSaveDb(db);
+                }
+                return demoDeferred({ status: 'ok' });
+            }
+
+            if (action === 'reorder_groups') {
+                var order = payload.order || [];
+                var oi;
+                for (oi = 0; oi < order.length; oi += 1) {
+                    var gix = demoFindById(db.groups, order[oi]);
+                    if (gix !== -1) db.groups[gix].sort_order = oi + 1;
+                }
+                demoSaveDb(db);
+                return demoDeferred({ status: 'ok' });
+            }
+
+            return demoRejected(400, 'Unknown action');
+        };
+
+        var demoIsApiUrl = function (url) {
+            return typeof url === 'string' && url.indexOf('api.php') !== -1;
+        };
+
+        var demoUrlAction = function (url) {
+            var m = url.match(/[?&]action=([^&]+)/);
+            return m ? m[1] : '';
+        };
+
+        var origAjax = $.ajax;
+        $.ajax = function (opts) {
+            if (!opts || !demoIsApiUrl(opts.url)) {
+                return origAjax.apply($, arguments);
+            }
+            var method = ((opts.type || opts.method || 'GET') + '').toUpperCase();
+            if (method === 'GET') {
+                var actionGet = demoUrlAction(opts.url);
+                if (actionGet === 'session') return demoHandleSession();
+                return demoHandleData();
+            }
+            var payload = {};
+            try { payload = JSON.parse(opts.data || '{}'); } catch (e) {}
+            return demoHandlePost(payload);
+        };
+
+        var origGetJSON = $.getJSON;
+        $.getJSON = function (url) {
+            if (!demoIsApiUrl(url)) return origGetJSON.apply($, arguments);
+            var actionGet2 = demoUrlAction(url);
+            if (actionGet2 === 'session') return demoHandleSession();
+            return demoHandleData();
+        };
+    }
+    // === END DEMO MODE ===
+
     function authApi(payload) {
         debugLog('auth-api.post.start', {
             action: payload && payload.action ? payload.action : null,
@@ -1065,6 +1386,11 @@ if (typeof self !== 'undefined' && typeof ServiceWorkerGlobalScope !== 'undefine
     function showAuth() {
         currentUser = null;
         $('#authLogin, #authPassword, #authKey').val('');
+        if (DEMO_MODE) {
+            $('#authLogin').val('sovenov');
+            $('#authPassword').val('sovenov');
+            $('#authKey').val('demo');
+        }
         $('#authShell').show();
         $('#appShell').hide();
         $('#currentUserBtn').text('');
@@ -1081,7 +1407,7 @@ if (typeof self !== 'undefined' && typeof ServiceWorkerGlobalScope !== 'undefine
         $('#authShell').hide();
         $('#appShell').show();
         $('#currentUserBtn').text((user && user.login) || loginLabel || 'Пользователь');
-        $('#adminLink').toggle(!!(user && user.is_admin));
+        $('#adminLink').toggle(!DEMO_MODE && !!(user && user.is_admin));
         resetForm();
         debugLog('app.show', {
             userId: user && user.id ? user.id : null,
